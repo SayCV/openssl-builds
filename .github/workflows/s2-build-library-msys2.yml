@@ -204,6 +204,7 @@ jobs:
             --cross-compile-prefix=$sample- \
             --prefix=$install_dir/$comName-$arch \
             no-asm \
+            no-docs \
             shared \
             $target
 
