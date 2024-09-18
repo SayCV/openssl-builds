@@ -95,7 +95,7 @@ jobs:
           echo "ABI: $abi"
 
           # Path to the version.h file
-          header_file="$comDir/VERSION.dat"
+          file="$comDir/VERSION.dat"
 
           # Extract the major, minor, and patch version numbers
           major=$(grep '^MAJOR=' "$file" | cut -d'=' -f2)
