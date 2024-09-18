@@ -138,16 +138,16 @@ jobs:
               target=linux-armv4;
               ;;
             hppa)
-              target=-static -O1 linux-generic32;
+              target='-static -O1 linux-generic32';
               ;;
             m68k)
-              target=-mcfv4e -mxgot linux-latomic -Wno-stringop-overflow no-quic;
+              target='-mcfv4e -mxgot linux-latomic -Wno-stringop-overflow no-quic';
               ;;
             mips | mipsel)
               target=linux-mips32;
               ;;
             mips64 | mips64el)
-              target=-static linux64-mips64;
+              target='linux64-mips64';
               ;;
             loongarch64)
               target=linux-generic64;
