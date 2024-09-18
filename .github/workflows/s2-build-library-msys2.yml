@@ -188,14 +188,14 @@ jobs:
             --banner=Configured --strict-warnings \
             --cross-compile-prefix=$sample- \
             --prefix=$install_dir/$comName-$arch \
-            --enable-static \
-            --enable-shared \
+            no-asm \
+            shared \
             $target
 
           echo "## Config dumping ..."
           ./configdata.pm --dump
           echo "## Building ..."
-          make -j4 -k
+          make -j4
           echo "## Installing ..."
           make install
         env:
