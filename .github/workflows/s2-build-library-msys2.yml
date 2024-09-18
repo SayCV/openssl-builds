@@ -131,8 +131,20 @@ jobs:
             aarch64)
               target=linux-aarch64;
               ;;
+            alpha)
+              target=linux-alpha-gcc;
+              ;;
             arm)
               target=linux-armv4;
+              ;;
+            hppa)
+              target=-static -O1 linux-generic32;
+              ;;
+            m68k)
+              target=-mcfv4e -mxgot linux-latomic -Wno-stringop-overflow no-quic;
+              ;;
+            mips | mipsel)
+              target=linux-mips32;
               ;;
             mips64 | mips64el)
               target=-static linux64-mips64;
@@ -140,8 +152,11 @@ jobs:
             loongarch64)
               target=linux-generic64;
               ;;
+            sparc64)
+              target=linux64-sparcv9;
+              ;;
             *)
-              target=$sample;
+              target=linux-$arch;
               ;;
           esac
 
