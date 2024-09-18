@@ -184,7 +184,7 @@ jobs:
 
           echo "## Configuring ..."
           cflags=""
-          CFLAGS="${cflags}" CXXFLAGS="${cflags}" CC=$sample-gcc $config_dir/config \
+          CFLAGS="${cflags}" CXXFLAGS="${cflags}" $config_dir/config \
             --banner=Configured --strict-warnings \
             --cross-compile-prefix=$sample- \
             --prefix=$install_dir/$comName-$arch \
