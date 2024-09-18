@@ -1,0 +1,113 @@
+---
+name: "Build aarch64"
+
+env:
+  sample: aarch64-unknown-linux-gnu
+  CONFIGURATION: "repos.json"
+  #OUT_DIR: "out"
+
+on:
+  push:
+    tags:
+      - "v*-rev*"
+  workflow_dispatch:
+
+jobs:
+  Set-repos:
+    name: "🐂 Parse-config"
+    runs-on: ubuntu-latest
+    outputs:
+      repos: ${{ steps.generate-matrix.outputs.repos }}
+      sample: ${{ env.sample }}
+    steps:
+      - name: "😄 Checkout"
+        uses: actions/checkout@v4
+
+      - name: "😆 Generate Matrix"
+        id: generate-matrix
+        run: |
+          echo "repos<<EOF" >> $GITHUB_OUTPUT
+          cat  ${{ env.CONFIGURATION }} >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
+  Detect-versions:
+    needs: [Set-repos, ]
+    uses: ./.github/workflows/s1-detect-versions.yml
+    with:
+      sample: >-
+        [
+          "${{ needs.Set-repos.outputs.sample }}"
+        ]
+      repos: "${{ needs.Set-repos.outputs.repos }}"
+
+  Build-library:
+    needs: [Set-repos, Detect-versions]
+    uses: ./.github/workflows/s2-build-library-msys2.yml
+    with:
+      sample: >-
+        [
+          "${{ needs.Set-repos.outputs.sample }}"
+        ]
+      repos: "${{ needs.Set-repos.outputs.repos }}"
+      #dryrun: true
+
+  Release:
+    needs: [Set-repos, Detect-versions, Build-library]
+    runs-on: ubuntu-latest
+    strategy:
+      max-parallel: 2
+      fail-fast: false
+      matrix:
+        repos: ${{ fromJSON(needs.Set-repos.outputs.repos) }}
+    env:
+      comDir: ${{ matrix.repos.comSource.name }}_${{ matrix.repos.comSource.commit }}
+
+      comRepoHost: ${{ matrix.repos.comSource.repo_host }}
+      comRepoUser: ${{ matrix.repos.comSource.repo_user }}
+      comRepoName: ${{ matrix.repos.comSource.repo_name }}
+      comName: ${{ matrix.repos.comSource.name }}
+      comBranch: ${{ matrix.repos.comSource.branch }}
+      comCommit: ${{ matrix.repos.comSource.commit }}
+    outputs:
+      arch:   ${{ steps.parse-build-pkgs-versions.outputs.arch }}
+      comVer:   ${{ steps.parse-build-pkgs-versions.outputs.comVer }}
+      releaseTag: ${{ steps.parse-build-pkgs-versions.outputs.releaseTag }}
+    permissions:
+      contents: write
+    steps:
+      - name: "download artifacts"
+        uses: actions/download-artifact@v4
+        with:
+          merge-multiple: true
+      - name: "Display structure of downloaded files"
+        run: |
+          ls -R
+
+      - name: parse build-pkgs-versions
+        id: parse-build-pkgs-versions
+        run: |
+          source build-pkgs-versions.txt
+          echo "::notice comVer=$comVer"
+          echo "arch=$arch"             >> $GITHUB_OUTPUT
+          echo "comVer=$comVer"         >> $GITHUB_OUTPUT
+          echo "releaseTag=v$comVer"    >> $GITHUB_OUTPUT
+          echo "libusb $comVer" > ${{ github.workspace }}-VERSIONS.txt
+
+      - name: Generate Hashes
+        run: |
+          echo "md5sum	"`md5sum -t $hash_file`         > $hash_file.hash
+          echo "sha1sum	"`sha1sum -t $hash_file`       >> $hash_file.hash
+          echo "sha256sum	"`sha256sum -t $hash_file`   >> $hash_file.hash
+          echo "sha512sum 	"`sha512sum -t $hash_file` >> $hash_file.hash
+        env:
+          hash_file: ${{ env.comName }}-${{ steps.parse-build-pkgs-versions.outputs.arch }}.tar.gz
+
+      - name: "💛 Upload to Release"
+        id: upload_to_release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.parse-build-pkgs-versions.outputs.releaseTag }}
+          body_path: ${{ github.workspace }}-VERSIONS.txt
+          files: |
+            *.tar.gz
+            *.hash

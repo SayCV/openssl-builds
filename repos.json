@@ -1,0 +1,12 @@
+[
+    {
+        "comSource": {
+            "name": "openssl",
+            "repo_host": "github.com",
+            "repo_user": "openssl",
+            "repo_name": "openssl",
+            "branch": "master",
+            "commit": "d81709316fc8f5703768c2ab4957a58dcea27872"
+        }
+    }
+]

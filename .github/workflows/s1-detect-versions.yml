@@ -1,0 +1,123 @@
+---
+name: "S1 - Detect versions"
+
+env:
+  CONFIGURATION: "repos.json"
+
+on:
+  workflow_call:
+    inputs:
+      sample:
+        description: Stringified JSON of sample
+        required: true
+        type: string
+      repos:
+        description: Stringified JSON of repos
+        required: true
+        type: string
+
+jobs:
+  Get-source:
+    name: "🐎 Get source"
+    runs-on: ubuntu-latest
+    strategy:
+      max-parallel: 2
+      fail-fast: false
+      matrix:
+        sample: ${{ fromJSON(inputs.sample) }}
+        repos: ${{ fromJSON(inputs.repos) }}
+    env:
+      comDir: ${{ matrix.repos.comSource.name }}_${{ matrix.repos.comSource.commit }}
+
+      comRepoHost: ${{ matrix.repos.comSource.repo_host }}
+      comRepoUser: ${{ matrix.repos.comSource.repo_user }}
+      comRepoName: ${{ matrix.repos.comSource.repo_name }}
+      comName: ${{ matrix.repos.comSource.name }}
+      comBranch: ${{ matrix.repos.comSource.branch }}
+      comCommit: ${{ matrix.repos.comSource.commit }}
+      sample: ${{ matrix.sample }}
+    outputs:
+      comVer: ${{ steps.parse-com-ver.outputs.comVer }}
+    steps:
+      - name: "✨ Create working dir"
+        run: mkdir -p $comDir && ls
+      - name: "✨ Prereq Linux"
+        if: ${{ runner.os == 'Linux' }}
+        run: |
+          sudo apt-get update && sudo apt-get install -y bison flex gperf help2man libtool-bin meson ninja-build texinfo
+      - uses: actions/checkout@v4
+      - name: "🌟 Parse ${{ env.comName }} commit sha"
+        if: ${{ env.comCommit == '' }}
+        id: parse-source-commit-sha
+        run: |
+          comCommit="$(git ls-remote https://$comRepoHost/$comRepoUser/$comRepoName --tags $comBranch | awk '{print $1;}')"
+          echo "comCommit=$comCommit" >> $GITHUB_ENV
+      - name: "✨ Restore ${{ env.comName }} cache if available"
+        id: restore-source-cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.comName }}-source.tar
+          key: ${{ env.comName }}-source-${{ env.comCommit }}
+      - name: "😆 Clone ${{ env.comName }}"
+        if: ${{ steps.restore-source-cache.outputs.cache-hit != 'true' }}
+        uses: actions/checkout@v4
+        with:
+          repository: '${{ env.comRepoUser }}/${{ env.comRepoName }}'
+          ref: '${{ env.comCommit }}'
+          fetch-depth: 0
+          path: ${{ env.comDir }}
+      - name: "Tar ${{ env.comName }}"
+        if: ${{ steps.restore-source-cache.outputs.cache-hit != 'true' }}
+        run: |
+          uname -a
+          tar -cf ${{ env.comName }}-source.tar ${{ env.comDir }}
+      - name: "upload ${{ env.comName }} for parse version"
+        if: ${{ steps.restore-source-cache.outputs.cache-hit != 'true' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.comName }}-source-${{ env.comCommit }}
+          path: ${{ env.comName }}-source.tar
+      - name: "extract ${{ env.comName }}"
+        if: ${{ steps.restore-source-cache.outputs.cache-hit == 'true' }}
+        run: |
+          tar -xvf ${{ env.comName }}-source.tar
+      - name: "😆 Parse ${{ env.comName }} version"
+        id: parse-com-ver
+        run: |
+          # The target triplet
+          triplet="$sample"
+          # Split into architecture, vendor, and OS-ABI
+          IFS='-' read -r arch vendor os abi <<< $(echo "$triplet" | sed 's/\(.*-\)\(.*\)-/\1\2-/')
+          # Output the parsed values
+          echo "Architecture: $arch"
+          echo "Vendor: $vendor"
+          echo "Operating System: $os"
+          echo "ABI: $abi"
+
+          # Path to the version.h file
+          header_file="$comDir/VERSION.dat"
+
+          # Extract the major, minor, and patch version numbers
+          major=$(grep '^MAJOR=' "$file" | cut -d'=' -f2)
+          minor=$(grep '^MINOR=' "$file" | cut -d'=' -f2)
+          patch=$(grep '^PATCH=' "$file" | cut -d'=' -f2)
+
+          # Combine the values into a version string
+          version="$major.$minor.$patch"
+
+          # Print the version
+          echo "## OpenSSL Version: $version"
+
+          echo "comVer=$version"                  >> $GITHUB_OUTPUT
+          echo "comVer=$version"                   > build-pkgs-versions.txt
+          echo "arch=$arch"                       >> build-pkgs-versions.txt
+          echo "vendor=$vendor"                   >> build-pkgs-versions.txt
+          echo "os=$os"                           >> build-pkgs-versions.txt
+          echo "abi=$abi"                         >> build-pkgs-versions.txt
+
+      - name: "upload build-pkgs-versions.txt"
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-pkgs-versions-${{ env.comCommit }}.txt
+          path: ${{ github.workspace }}/build-pkgs-versions.txt
+        if: ${{ always() }}

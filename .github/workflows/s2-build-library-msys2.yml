@@ -1,0 +1,227 @@
+---
+name: "S2 - Build library"
+
+on:
+  workflow_call:
+    inputs:
+      sample:
+        description: Stringified JSON of sample
+        required: true
+        type: string
+      repos:
+        description: Stringified JSON of repos
+        required: true
+        type: string
+      dryrun:
+        default: false
+        required: false
+        type: boolean
+
+jobs:
+  build:
+    if: ${{ !inputs.dryrun }}
+    runs-on: ${{ matrix.host }}
+    strategy:
+      matrix:
+        host: ["windows-2022"]
+        sys: ["MSYS"]
+        sample: ${{ fromJSON(inputs.sample) }}
+        repos: ${{ fromJSON(inputs.repos) }}
+        exclude:
+          # Exclude both glibc & uClibc ARC Linux toolchains as
+          # there's no known use of ARC Linux toolchains on Mac,
+          # and anyway glibc fails to build for ARC700,
+          # see https://github.com/crosstool-ng/crosstool-ng/pull/1456#issuecomment-779150246
+          - {host: "macos-12", sample: "arc-multilib-linux-gnu"}
+          - {host: "macos-12", sample: "arc-multilib-linux-uclibc"}
+
+          # Exclude mips*-*-linux-gnu because of <byteswap.h> usage in
+          # elf-entry.c for linux kernel headers.  <byteswap.h> is a GNU
+          # extension and doesn't exist on MacOS X
+          - {host: "macos-12", sample: "mips-unknown-linux-gnu"}
+          - {host: "macos-12", sample: "mips64-unknown-linux-gnu"}
+
+          # Exclude x86_64-w64-mingw32,x86_64-pc-linux-gnu because it crashes on m4 build with
+          # a Segmentation fault
+          - {host: "macos-12", sample: "x86_64-w64-mingw32,x86_64-pc-linux-gnu"}
+    env:
+      comDir: ${{ matrix.repos.comSource.name }}_${{ matrix.repos.comSource.commit }}
+
+      comRepoHost: ${{ matrix.repos.comSource.repo_host }}
+      comRepoUser: ${{ matrix.repos.comSource.repo_user }}
+      comRepoName: ${{ matrix.repos.comSource.repo_name }}
+      comName: ${{ matrix.repos.comSource.name }}
+      comBranch: ${{ matrix.repos.comSource.branch }}
+      comCommit: ${{ matrix.repos.comSource.commit }}
+      sample: ${{ matrix.sample }}
+    steps:
+      - name: "prereq MSYS2"
+        if: ${{ runner.os == 'Windows' }}
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: ${{ matrix.sys }}
+          update: true
+          install: >-
+            base-devel msys2-runtime-devel autotools intltool libtool gcc bison flex gperf help2man meson ninja texinfo patch unzip
+            autoconf-archive gettext-devel ncurses-devel rsync
+          path-type: inherit
+      - name: "prereq Windows"
+        if: ${{ runner.os == 'Windows' }}
+        run: |
+          git config --global core.autocrlf input
+          cd ..
+          fsutil file SetCaseSensitiveInfo ${{ github.event.repository.name }} enable
+          cd ${{ github.event.repository.name }}
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: "😆 Clone ${{ env.comName }}"
+        uses: actions/checkout@v4
+        with:
+          repository: '${{ env.comRepoUser }}/${{ env.comRepoName }}'
+          ref: '${{ env.comCommit }}'
+          fetch-depth: 0
+          path: ${{ env.comDir }}
+      - name: find-latest-tag of toolchain
+        uses: oprypin/find-latest-tag@v1
+        with:
+          repository: '${{ github.repository_owner }}/crosstool-ng-msys2-builds'
+          releases-only: true
+        id: toolchain-find-latest-tag
+      - name: download toolchain
+        uses: robinraju/release-downloader@v1
+        with:
+          repository: '${{ github.repository_owner }}/crosstool-ng-msys2-builds'
+          latest: true
+          # tag: ''
+          fileName: '${{ matrix.sample }}-msys2.windows-2022.tar.gz'
+          tarBall: false
+          zipBall: false
+          #token: ${{ secrets.GITHUB_TOKEN }}
+      - name: extract toolchain
+        shell: msys2 {0}
+        run: |
+          mkdir -p .local
+          tar -xf ${{ matrix.sample }}-msys2.windows-2022.tar.gz -C .local
+        env:
+          MSYS_NO_PATHCONV:
+          MSYS: winsymlinks:native
+      - name: "prereq PATH"
+        if: ${{ runner.os == 'Windows' }}
+        shell: msys2 {0}
+        run: echo "$GITHUB_WORKSPACE/.local/bin" >> "$GITHUB_PATH"
+      - name: Set reusable strings
+        # Turn repeated input strings (such as the build output directory) into step outputs. These step outputs can be used throughout the workflow file.
+        id: strings
+        shell: msys2 {0}
+        run: |
+          workspace="$(cygpath '${{ github.workspace }}')"
+          echo "workspace="$(cygpath '${{ github.workspace }}')"" >> "$GITHUB_OUTPUT"
+          # The target triplet
+          triplet="$sample"
+          # Split into architecture, vendor, and OS-ABI
+          IFS='-' read -r arch vendor os abi <<< $(echo "$triplet" | sed 's/\(.*-\)\(.*\)-/\1\2-/')
+          # Output the parsed values
+          echo "Architecture: $arch"
+          echo "Vendor: $vendor"
+          echo "Operating System: $os"
+          echo "ABI: $abi"
+          host=$sample;
+          case "$arch" in
+            aarch64)
+              target=linux-aarch64;
+              ;;
+            arm)
+              target=linux-armv4;
+              ;;
+            mips64 | mips64el)
+              target=-static linux64-mips64;
+              ;;
+            loongarch64)
+              target=linux-generic64;
+              ;;
+            *)
+              target=$sample;
+              ;;
+          esac
+
+          source_dir=$workspace/$comDir
+          build_dir=$workspace/build
+          install_dir=$workspace/install
+          config_dir=`realpath --relative-to=$build_dir $source_dir`
+          echo "## source_dir=$source_dir"
+          echo "## build_dir=$build_dir"
+          echo "## install_dir=$install_dir"
+          echo "## config_dir=$config_dir"
+
+          echo "source_dir=$source_dir"   >> "$GITHUB_ENV"
+          echo "build_dir=$build_dir"     >> "$GITHUB_ENV"
+          echo "install_dir=$install_dir" >> "$GITHUB_ENV"
+          echo "config_dir=$config_dir"   >> "$GITHUB_ENV"
+          echo "target=$target"   >> "$GITHUB_ENV"
+          echo "arch=$arch"   >> "$GITHUB_ENV"
+          echo "host=$host"   >> "$GITHUB_ENV"
+          echo "arch=$arch"   >> "$GITHUB_OUTPUT"
+
+      - name: patch source
+        shell: msys2 {0}
+        run: |
+          echo "## nothing to do"
+      - name: build ${{ env.comName }} for ${{ steps.strings.outputs.arch }}
+        shell: msys2 {0}
+        run: |
+          echo "## source_dir=$source_dir"
+          echo "## build_dir=$build_dir"
+          echo "## install_dir=$install_dir"
+          echo "## config_dir=$config_dir"
+          mkdir -p $build_dir
+          mkdir -p $install_dir
+
+          cd $source_dir
+          echo "## Bootstraping ..."
+          #./bootstrap.sh
+          cd $build_dir
+
+          echo "## Configuring ..."
+          cflags=""
+          CFLAGS="${cflags}" CXXFLAGS="${cflags}" CC=$sample-gcc $config_dir/config \
+            --banner=Configured --strict-warnings \
+            --cross-compile-prefix=$sample- \
+            --prefix=$install_dir/$comName-$arch \
+            --enable-static \
+            --enable-shared \
+            $target
+
+          echo "## Config dumping ..."
+          ./configdata.pm --dump
+          echo "## Building ..."
+          make -j4 -k
+          echo "## Installing ..."
+          make install
+        env:
+          MSYS_NO_PATHCONV:
+          MSYS: winsymlinks:native
+      - name: create ${{ env.comName }}-${{ steps.strings.outputs.arch }}.tar.gz tarball
+        shell: msys2 {0}
+        run: |
+          tar -C $install_dir \
+              -czf ${{ env.comName }}-${{ steps.strings.outputs.arch }}.tar.gz . || true
+      - name: create ${{ env.comName }}-${{ steps.strings.outputs.arch }}-buildlog tarball
+        shell: msys2 {0}
+        run: |
+          tar -C $build_dir \
+              -czf ${{ env.comName }}-${{ steps.strings.outputs.arch }}-buildlog.tar.gz config.log .config || true
+        if: ${{ always() }}
+      - name: upload ${{ env.comName }}-${{ steps.strings.outputs.arch }}.tar.gz tarball
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.comName }}-${{ steps.strings.outputs.arch }}.tar.gz
+          path: |
+            ${{ env.comName }}-${{ steps.strings.outputs.arch }}.tar.gz
+      - name: upload log
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.comName }}-${{ steps.strings.outputs.arch }}-buildlog.tar.gz
+          path: |
+            ${{ env.comName }}-${{ steps.strings.outputs.arch }}-buildlog.tar.gz
+        if: ${{ always() }}
