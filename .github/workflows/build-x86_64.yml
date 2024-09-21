@@ -2,7 +2,7 @@
 name: "Build x86_64"
 
 env:
-  sample: x86_64-unknown-linux-gnu
+  sample: x86_64-unknown-linux-musl
   CONFIGURATION: "repos.json"
   #OUT_DIR: "out"
 
